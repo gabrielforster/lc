@@ -323,3 +323,20 @@ func validHost(h string) bool {
 	}
 	return true
 }
+
+// Domains lists the hostnames a token owns.
+func (r *Registry) Domains(tok store.Token) ([]string, error) { return r.db.Domains(tok.ID) }
+
+// ReleaseDomain gives up a claim. A live tunnel keeps serving until its session
+// ends; releasing only drops the durable ownership, so the name becomes
+// claimable by someone else afterwards.
+func (r *Registry) ReleaseDomain(tok store.Token, host string) muxproto.ClaimResult {
+	err := r.db.ReleaseDomain(tok.ID, normalizeHost(host))
+	switch {
+	case err == nil:
+		return muxproto.ClaimResult{OK: true}
+	case errors.Is(err, store.ErrNotFound):
+		return muxproto.ClaimResult{Reason: muxproto.ClaimNotFound}
+	}
+	return muxproto.ClaimResult{Reason: muxproto.ClaimInvalid}
+}

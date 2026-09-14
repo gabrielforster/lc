@@ -45,6 +45,12 @@ type Agent struct {
 	mu      sync.RWMutex
 	tunnels map[string]muxproto.TunnelSpec // by server-assigned id
 	ctrl    net.Conn
+	// ctrlReader must be the same reader that consumed HelloOK, or replies
+	// buffered behind it are lost.
+	ctrlReader *muxproto.Reader
+
+	// reqMu serialises control requests, which share one stream.
+	reqMu sync.Mutex
 }
 
 func New(cfg Config, log *slog.Logger) *Agent {
@@ -141,6 +147,7 @@ func (a *Agent) session(ctx context.Context) error {
 
 	a.mu.Lock()
 	a.ctrl = ctrl
+	a.ctrlReader = r
 	a.tunnels = map[string]muxproto.TunnelSpec{}
 	for _, res := range ok.Tunnels {
 		for _, spec := range a.cfg.Tunnels {
@@ -155,6 +162,12 @@ func (a *Agent) session(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 		sess.Close()
+	}()
+
+	defer func() {
+		a.mu.Lock()
+		a.ctrl, a.ctrlReader = nil, nil
+		a.mu.Unlock()
 	}()
 
 	// From here the server drives: every inbound public connection arrives as a
@@ -223,16 +236,60 @@ func (a *Agent) serveStream(stream *yamux.Stream) {
 
 // ClaimDomain asks the server for a custom hostname on the live session.
 func (a *Agent) ClaimDomain(domain string) (muxproto.ClaimResult, error) {
+	var res muxproto.ClaimResult
+	err := a.request(&muxproto.ClaimDomain{Domain: domain}, &res)
+	return res, err
+}
+
+// ReleaseDomain gives up a claimed hostname.
+func (a *Agent) ReleaseDomain(domain string) (muxproto.ClaimResult, error) {
+	var res muxproto.ClaimResult
+	err := a.request(&muxproto.ReleaseDomain{Domain: domain}, &res)
+	return res, err
+}
+
+// Domains lists the hostnames this agent's token owns.
+func (a *Agent) Domains() ([]string, error) {
+	var res muxproto.DomainList
+	err := a.request(&muxproto.ListDomains{}, &res)
+	return res.Domains, err
+}
+
+// request sends one control message and decodes its reply.
+//
+// The lock is held across the exchange because the control stream carries one
+// request at a time; concurrent callers would otherwise read each other's
+// replies.
+func (a *Agent) request(req, out any) error {
+	a.reqMu.Lock()
+	defer a.reqMu.Unlock()
+
 	a.mu.RLock()
-	ctrl := a.ctrl
+	ctrl, r := a.ctrl, a.ctrlReader
 	a.mu.RUnlock()
 	if ctrl == nil {
-		return muxproto.ClaimResult{}, errors.New("agent: not connected")
+		return errors.New("agent: not connected")
 	}
-	if err := muxproto.Write(ctrl, &muxproto.ClaimDomain{Domain: domain}); err != nil {
-		return muxproto.ClaimResult{}, err
+	if err := muxproto.Write(ctrl, req); err != nil {
+		return err
 	}
-	var res muxproto.ClaimResult
-	err := muxproto.NewReader(ctrl).Read(&res)
-	return res, err
+	return r.Read(out)
+}
+
+// WaitReady blocks until the session is registered, or ctx expires. One-shot
+// commands need this because Run connects asynchronously.
+func (a *Agent) WaitReady(ctx context.Context) error {
+	for {
+		a.mu.RLock()
+		ready := a.ctrl != nil
+		a.mu.RUnlock()
+		if ready {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
 }

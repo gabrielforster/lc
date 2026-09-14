@@ -85,9 +85,24 @@ const (
 	ClaimDisabled ClaimReason = "disabled"
 	// ClaimInvalid means the name is not a usable hostname.
 	ClaimInvalid ClaimReason = "invalid"
+	// ClaimNotFound means the token does not own the name it tried to release.
+	ClaimNotFound ClaimReason = "not_found"
 )
 
-// ClaimResult answers a ClaimDomain.
+// ListDomains asks for the hostnames this token owns.
+type ListDomains struct{}
+
+// DomainList answers a ListDomains.
+type DomainList struct {
+	Domains []string `json:"domains"`
+}
+
+// ReleaseDomain gives up a claim.
+type ReleaseDomain struct {
+	Domain string `json:"domain"`
+}
+
+// ClaimResult answers a ClaimDomain, and a ReleaseDomain.
 type ClaimResult struct {
 	OK     bool        `json:"ok"`
 	Reason ClaimReason `json:"reason,omitempty"`
@@ -141,6 +156,12 @@ func typeName(v any) (string, error) {
 		return "hello_ok", nil
 	case *ClaimDomain:
 		return "claim_domain", nil
+	case *ListDomains:
+		return "list_domains", nil
+	case *DomainList:
+		return "domain_list", nil
+	case *ReleaseDomain:
+		return "release_domain", nil
 	case *ClaimResult:
 		return "claim_result", nil
 	case *StreamInit:
@@ -209,6 +230,21 @@ func (r *Reader) Read(out any) error {
 		return fmt.Errorf("%w: got %q, want %q", ErrUnexpected, env.Type, want)
 	}
 	return json.Unmarshal(env.Body, out)
+}
+
+// ReadAny decodes the next frame without knowing its type, returning the wire
+// tag and the undecoded body. The server's control loop uses this to dispatch
+// between the several request types an agent may send at any time.
+func (r *Reader) ReadAny() (string, json.RawMessage, error) {
+	line, err := r.br.ReadBytes('\n')
+	if err != nil {
+		return "", nil, err
+	}
+	var env envelope
+	if err := json.Unmarshal(line, &env); err != nil {
+		return "", nil, fmt.Errorf("muxproto: malformed frame: %w", err)
+	}
+	return env.Type, env.Body, nil
 }
 
 // Buffered returns the underlying reader, positioned after the last decoded

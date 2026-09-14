@@ -32,25 +32,40 @@ func main() {
 	)
 	fs.Parse(os.Args[1:])
 
-	if err := run(*path, *debug); err != nil {
+	if err := dispatch(*path, *debug, fs.Args()); err != nil {
 		fmt.Fprintln(os.Stderr, "lc:", err)
 		os.Exit(1)
 	}
 }
 
-func run(path string, debug bool) error {
-	raw, err := os.ReadFile(path)
+// dispatch chooses between running the agent and the one-shot subcommands.
+func dispatch(path string, debug bool, args []string) error {
+	cfg, err := load(path)
 	if err != nil {
 		return err
 	}
+	if len(args) > 0 && args[0] == "domains" {
+		return domains(cfg, args[1:])
+	}
+	return run(cfg, debug)
+}
+
+func load(path string) (config, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return config{}, err
+	}
 	var cfg config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return fmt.Errorf("parsing %s: %w", path, err)
+		return config{}, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	if cfg.Server == "" || cfg.Token == "" {
-		return fmt.Errorf("%s needs both \"server\" and \"token\"", path)
+		return config{}, fmt.Errorf("%s needs both \"server\" and \"token\"", path)
 	}
+	return cfg, nil
+}
 
+func run(cfg config, debug bool) error {
 	level := slog.LevelInfo
 	if debug {
 		level = slog.LevelDebug

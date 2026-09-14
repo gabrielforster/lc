@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -158,19 +159,19 @@ func (s *Server) registerAll(tok store.Token, sess *yamux.Session, specs []muxpr
 }
 
 // serveControlStream handles runtime messages until the agent disconnects.
+//
+// Reading here doubles as liveness detection: the read fails when the agent
+// goes away, which is what unblocks the caller's cleanup.
 func (s *Server) serveControlStream(ctx context.Context, ctrl net.Conn, r *muxproto.Reader, tok store.Token) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for {
-			var claim muxproto.ClaimDomain
-			if err := r.Read(&claim); err != nil {
-				return // agent gone, or a frame we do not handle
+			kind, body, err := r.ReadAny()
+			if err != nil {
+				return // agent gone
 			}
-			res := s.reg.Claim(tok, claim.Domain)
-			s.log.Info("domain claim", "token", tok.ID, "domain", claim.Domain,
-				"ok", res.OK, "reason", res.Reason)
-			if err := muxproto.Write(ctrl, &res); err != nil {
+			if err := s.dispatch(ctrl, tok, kind, body); err != nil {
 				return
 			}
 		}
@@ -179,6 +180,43 @@ func (s *Server) serveControlStream(ctx context.Context, ctrl net.Conn, r *muxpr
 	case <-ctx.Done():
 	case <-done:
 	}
+}
+
+// dispatch handles one runtime control request. An unknown message type is
+// answered with an error rather than closing the session, so an older server
+// stays usable by a newer agent that asks for something it does not know.
+func (s *Server) dispatch(ctrl net.Conn, tok store.Token, kind string, body []byte) error {
+	switch kind {
+	case "claim_domain":
+		var req muxproto.ClaimDomain
+		if err := json.Unmarshal(body, &req); err != nil {
+			return muxproto.Write(ctrl, &muxproto.Error{Code: muxproto.CodeBadReq, Msg: err.Error()})
+		}
+		res := s.reg.Claim(tok, req.Domain)
+		s.log.Info("domain claim", "token", tok.ID, "domain", req.Domain,
+			"ok", res.OK, "reason", res.Reason)
+		return muxproto.Write(ctrl, &res)
+
+	case "list_domains":
+		domains, err := s.reg.Domains(tok)
+		if err != nil {
+			return muxproto.Write(ctrl, &muxproto.Error{Code: muxproto.CodeInternal, Msg: err.Error()})
+		}
+		return muxproto.Write(ctrl, &muxproto.DomainList{Domains: domains})
+
+	case "release_domain":
+		var req muxproto.ReleaseDomain
+		if err := json.Unmarshal(body, &req); err != nil {
+			return muxproto.Write(ctrl, &muxproto.Error{Code: muxproto.CodeBadReq, Msg: err.Error()})
+		}
+		res := s.reg.ReleaseDomain(tok, req.Domain)
+		s.log.Info("domain release", "token", tok.ID, "domain", req.Domain, "ok", res.OK)
+		return muxproto.Write(ctrl, &res)
+	}
+	return muxproto.Write(ctrl, &muxproto.Error{
+		Code: muxproto.CodeBadReq,
+		Msg:  fmt.Sprintf("unsupported control message %q", kind),
+	})
 }
 
 // Dial opens a stream to the agent serving t and announces the client address.
