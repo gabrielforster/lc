@@ -1,5 +1,7 @@
 # lc
 
+**English** · [Português (BR)](README.pt-BR.md) · [Español](README.es.md)
+
 A self-hosted reverse tunnel. It makes services on a machine behind NAT
 reachable at a public address, **without asking anyone who connects to install
 anything** — a browser, a plain TCP client and a vanilla Minecraft client all
