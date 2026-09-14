@@ -35,14 +35,15 @@ func main() {
 func serve(args []string) error {
 	fs := flag.NewFlagSet("lcd", flag.ExitOnError)
 	var (
-		dbPath  = fs.String("db", "lc.db", "path to the SQLite state file")
-		control = fs.String("control", ":7000", "control listener address")
-		portMin = fs.Int("port-min", 20000, "lowest automatically assigned public port")
-		portMax = fs.Int("port-max", 20100, "highest automatically assigned public port")
-		public  = fs.String("public-host", "127.0.0.1", "hostname users reach this server on")
-		custom  = fs.Bool("allow-custom-domains", false, "let agents claim unreserved hostnames")
-		resHost = fs.String("reserved-hosts", "", "comma-separated hostnames the server keeps for itself")
-		debug   = fs.Bool("debug", false, "verbose logging")
+		dbPath   = fs.String("db", "lc.db", "path to the SQLite state file")
+		control  = fs.String("control", ":7000", "control listener address")
+		httpAddr = fs.String("http", ":8080", "public HTTP listener address, empty to disable")
+		portMin  = fs.Int("port-min", 20000, "lowest automatically assigned public port")
+		portMax  = fs.Int("port-max", 20100, "highest automatically assigned public port")
+		public   = fs.String("public-host", "127.0.0.1", "hostname users reach this server on")
+		custom   = fs.Bool("allow-custom-domains", false, "let agents claim unreserved hostnames")
+		resHost  = fs.String("reserved-hosts", "", "comma-separated hostnames the server keeps for itself")
+		debug    = fs.Bool("debug", false, "verbose logging")
 	)
 	fs.Parse(args)
 
@@ -73,7 +74,23 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return server.New(reg, log).ServeControl(ctx, ln)
+	srv := server.New(reg, log)
+
+	if *httpAddr != "" {
+		hln, err := net.Listen("tcp", *httpAddr)
+		if err != nil {
+			return err
+		}
+		defer hln.Close()
+		log.Info("http listener up", "addr", hln.Addr().String())
+		go func() {
+			if err := srv.ServeHTTPListener(ctx, hln); err != nil {
+				log.Error("http listener failed", "err", err)
+			}
+		}()
+	}
+
+	return srv.ServeControl(ctx, ln)
 }
 
 func newLogger(debug bool) *slog.Logger {

@@ -27,6 +27,8 @@ type Harness struct {
 	Token    string
 	// ControlAddr is where the agent connects.
 	ControlAddr string
+	// HTTPAddr is the public HTTP frontend, set when Options.HTTP is true.
+	HTTPAddr string
 }
 
 // Options tunes the harness for a test.
@@ -36,6 +38,8 @@ type Options struct {
 	AllowCustomDomains bool
 	PortMin, PortMax   int
 	Transforms         map[muxproto.Kind]agent.Transform
+	// HTTP starts the public HTTP frontend.
+	HTTP bool
 }
 
 // Start brings up a server and an agent and waits until the tunnels are live.
@@ -80,6 +84,16 @@ func Start(t *testing.T, opts Options) *Harness {
 	t.Cleanup(cancel)
 	go srv.ServeControl(ctx, ln)
 
+	var httpAddr string
+	if opts.HTTP {
+		hln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpAddr = hln.Addr().String()
+		go srv.ServeHTTPListener(ctx, hln)
+	}
+
 	ag := agent.New(agent.Config{
 		ServerAddr: ln.Addr().String(),
 		Token:      secret,
@@ -92,7 +106,7 @@ func Start(t *testing.T, opts Options) *Harness {
 
 	h := &Harness{
 		Server: srv, Agent: ag, Registry: reg, DB: db,
-		Token: secret, ControlAddr: ln.Addr().String(),
+		Token: secret, ControlAddr: ln.Addr().String(), HTTPAddr: httpAddr,
 	}
 	h.waitReady(t, opts.Tunnels)
 	return h
