@@ -67,6 +67,7 @@ curl -H 'Host: web.mc.localhost' http://127.0.0.1:8080/
 
 | | |
 |---|---|
+| [Implantação](docs/deployment.md) | Configuração da VPS, systemd, firewall, com e sem domínio |
 | [Arquitetura](docs/architecture.md) | Como funciona e por que tem esse formato |
 | [Protocolo de controle](docs/protocol.md) | O protocolo entre agente e servidor |
 | [Executando o lc](docs/operations.md) | Flags, configuração, permissões, TLS, timeouts de ociosidade |
