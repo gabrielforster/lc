@@ -56,6 +56,9 @@ type Options struct {
 	MaxConnsPerTunnel int
 	// IdleTimeout closes proxied connections after this long without traffic.
 	IdleTimeout time.Duration
+	// NoAgentIdleTimeout leaves the agent side untimed, so a test can check
+	// that the server reclaims on its own.
+	NoAgentIdleTimeout bool
 }
 
 // Start brings up a server and an agent and waits until the tunnels are live.
@@ -112,6 +115,11 @@ func Start(t *testing.T, opts Options) *Harness {
 		go srv.ServeHTTPListener(ctx, hln)
 	}
 
+	agentIdle := opts.IdleTimeout
+	if opts.NoAgentIdleTimeout {
+		agentIdle = 0
+	}
+
 	var (
 		httpsAddr string
 		certs     *server.SelfSigned
@@ -143,7 +151,7 @@ func Start(t *testing.T, opts Options) *Harness {
 		ServerAddr:  ln.Addr().String(),
 		Token:       secret,
 		Tunnels:     opts.Tunnels,
-		IdleTimeout: opts.IdleTimeout,
+		IdleTimeout: agentIdle,
 	}, log)
 	for kind, tf := range opts.Transforms {
 		ag.SetTransform(kind, tf)

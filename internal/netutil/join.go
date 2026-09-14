@@ -3,6 +3,7 @@ package netutil
 import (
 	"io"
 	"sync"
+	"time"
 )
 
 // CloseWriter is implemented by connections that can signal "no more data from
@@ -33,14 +34,34 @@ func Join(a, b io.ReadWriteCloser) error {
 	cp := func(dst, src io.ReadWriteCloser) {
 		defer wg.Done()
 		_, err := io.Copy(dst, src)
-		// Signal completion to the peer, then make sure a stalled reader on the
-		// other side cannot block forever if half-close is unavailable.
-		if cw, ok := dst.(CloseWriter); ok {
-			cw.CloseWrite()
-		} else {
-			dst.Close()
+
+		if err == nil {
+			// A clean EOF means this direction is finished while the other may
+			// still be in use, so only the write half is closed.
+			if cw, ok := dst.(CloseWriter); ok {
+				cw.CloseWrite()
+			} else {
+				dst.Close()
+			}
+			return
 		}
-		if err != nil && !isBenign(err) {
+
+		// An error means the connection is broken rather than finished. Half-
+		// closing here would leave the opposite direction blocked forever on a
+		// peer that is gone -- and that peer is precisely what an idle timeout
+		// is trying to reclaim.
+		//
+		// Closing is not enough on its own: a yamux stream's Close is itself a
+		// half-close, so a goroutine already blocked reading it would keep
+		// waiting. Expiring the deadlines forces those reads to return, which
+		// is what actually releases the sockets, the stream and the tunnel's
+		// connection slot.
+		expire(a)
+		expire(b)
+		a.Close()
+		b.Close()
+
+		if !isBenign(err) {
 			mu.Lock()
 			if ferr == nil {
 				ferr = err
@@ -57,6 +78,20 @@ func Join(a, b io.ReadWriteCloser) error {
 	a.Close()
 	b.Close()
 	return ferr
+}
+
+// deadliner is implemented by anything that can have in-flight reads and
+// writes interrupted -- net.Conn and yamux.Stream both do.
+type deadliner interface {
+	SetDeadline(time.Time) error
+}
+
+// expire forces any read or write already blocked on c to return.
+func expire(c any) {
+	if d, ok := c.(deadliner); ok {
+		// Any time in the past works; reads waiting now return immediately.
+		d.SetDeadline(time.Now().Add(-time.Second))
+	}
 }
 
 // isBenign reports whether err is just a connection ending, which every proxied
