@@ -80,14 +80,22 @@ is what makes reconnection invisible to users.
 
 ## Two subtleties worth knowing
 
-**Half-close.** A plain pair of `io.Copy` calls leaks connections. When one side
-finishes sending, the peer must see EOF while still being able to send; if that
-signal is dropped, a peer waiting to receive never learns the other side is
-done. The failure mode is gradual resource exhaustion rather than anything
-visible, so `netutil.Join` handles it once, centrally, instead of at each call
-site. `yamux.Stream.Close` is already a half-close — it sends a FIN and leaves
-reads working — but it is spelled `Close`, so it is adapted rather than used
-directly.
+**Half-close, and its opposite.** A plain pair of `io.Copy` calls leaks
+connections. When one side finishes sending, the peer must see EOF while still
+being able to send; if that signal is dropped, a peer waiting to receive never
+learns the other side is done. The failure mode is gradual resource exhaustion
+rather than anything visible, so `netutil.Join` handles it once, centrally,
+instead of at each call site. `yamux.Stream.Close` is already a half-close — it
+sends a FIN and leaves reads working — but it is spelled `Close`, so it is
+adapted rather than used directly.
+
+The inverse case matters just as much. A half-close is only correct when a copy
+ended in a *clean* EOF. If it ended in an error the connection is broken, not
+finished, and half-closing would leave the opposite direction blocked forever on
+a peer that is gone — precisely the connection an idle timeout is trying to
+reclaim. So `Join` tears both sides down on error, and expires their deadlines
+first, because closing alone would not wake a goroutine already blocked reading
+a yamux stream.
 
 **Peeking.** A sniffer must not consume the bytes it inspects: the local service
 needs an intact protocol. `netutil.PeekConn` routes reads through the same

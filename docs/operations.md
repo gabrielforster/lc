@@ -91,7 +91,13 @@ run out.
 
 `-idle-timeout` closes connections that have moved no bytes in either direction
 for that long. Traffic in **either** direction counts, so a long transfer is
-never interrupted.
+never interrupted. The server reclaims on its own: it does not depend on the
+local service noticing anything, so a service that holds connections open
+without reacting is reclaimed like any other.
+
+The agent's optional `idle_timeout` is separate and covers only its own side —
+a local service still holding a connection after the server has gone away. The
+server's setting is the one that governs public connections.
 
 The timeout cannot distinguish a dead peer from a legitimately quiet one, which
 is the tradeoff to be aware of:
