@@ -78,6 +78,10 @@ func run(cfg config, debug bool) error {
 		Tunnels:    cfg.Tunnels,
 	}, log)
 
+	// Minecraft tunnels rewrite the handshake so the server sees the player's
+	// real address. Every other kind is piped through untouched.
+	a.SetTransform(muxproto.KindMinecraft, agent.MinecraftTransform)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

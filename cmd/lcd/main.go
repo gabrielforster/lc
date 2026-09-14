@@ -15,6 +15,7 @@ import (
 
 	"github.com/gabrielforster/lc/internal/registry"
 	"github.com/gabrielforster/lc/internal/server"
+	"github.com/gabrielforster/lc/internal/sniff"
 	"github.com/gabrielforster/lc/internal/store"
 )
 
@@ -48,6 +49,7 @@ func serve(args []string) error {
 		certFile  = fs.String("tls-cert", "", "certificate file, for -tls=files")
 		keyFile   = fs.String("tls-key", "", "private key file, for -tls=files")
 		certCache = fs.String("tls-cache", "lc-certs", "certificate cache directory, for -tls=autocert")
+		mcAddr    = fs.String("minecraft", "", "public Minecraft listener address, e.g. :25565, empty to disable")
 		debug     = fs.Bool("debug", false, "verbose logging")
 	)
 	fs.Parse(args)
@@ -109,6 +111,23 @@ func serve(args []string) error {
 		go func() {
 			if err := srv.ServeHTTPSListener(ctx, sln, certs); err != nil {
 				log.Error("https listener failed", "err", err)
+			}
+		}()
+	}
+
+	if *mcAddr != "" {
+		// One listener serves every Minecraft tunnel: the hostname the player
+		// typed is in the handshake, so the connection can be routed by peeking
+		// at it.
+		mln, err := net.Listen("tcp", *mcAddr)
+		if err != nil {
+			return err
+		}
+		defer mln.Close()
+		log.Info("minecraft listener up", "addr", mln.Addr().String())
+		go func() {
+			if err := srv.ServeSniffed(ctx, mln, sniff.Minecraft{}); err != nil {
+				log.Error("minecraft listener failed", "err", err)
 			}
 		}()
 	}

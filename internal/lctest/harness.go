@@ -15,6 +15,7 @@ import (
 	"github.com/gabrielforster/lc/internal/muxproto"
 	"github.com/gabrielforster/lc/internal/registry"
 	"github.com/gabrielforster/lc/internal/server"
+	"github.com/gabrielforster/lc/internal/sniff"
 	"github.com/gabrielforster/lc/internal/store"
 )
 
@@ -34,6 +35,8 @@ type Harness struct {
 	// Certs is the self-signed source backing HTTPSAddr; its RootCAs must be
 	// trusted by any test client.
 	Certs *server.SelfSigned
+	// MCAddr is the public Minecraft frontend, set when Options.Minecraft is true.
+	MCAddr string
 }
 
 // Options tunes the harness for a test.
@@ -47,6 +50,8 @@ type Options struct {
 	HTTP bool
 	// HTTPS starts the public TLS frontend with a self-signed cert source.
 	HTTPS bool
+	// Minecraft starts a sniffing L4 frontend routing by handshake hostname.
+	Minecraft bool
 }
 
 // Start brings up a server and an agent and waits until the tunnels are live.
@@ -118,6 +123,16 @@ func Start(t *testing.T, opts Options) *Harness {
 		go srv.ServeHTTPSListener(ctx, sln, certs)
 	}
 
+	var mcAddr string
+	if opts.Minecraft {
+		mln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		mcAddr = mln.Addr().String()
+		go srv.ServeSniffed(ctx, mln, sniff.Minecraft{})
+	}
+
 	ag := agent.New(agent.Config{
 		ServerAddr: ln.Addr().String(),
 		Token:      secret,
@@ -130,7 +145,7 @@ func Start(t *testing.T, opts Options) *Harness {
 
 	h := &Harness{
 		Server: srv, Agent: ag, Registry: reg, DB: db,
-		Token: secret, ControlAddr: ln.Addr().String(), HTTPAddr: httpAddr, HTTPSAddr: httpsAddr, Certs: certs,
+		Token: secret, ControlAddr: ln.Addr().String(), HTTPAddr: httpAddr, HTTPSAddr: httpsAddr, Certs: certs, MCAddr: mcAddr,
 	}
 	h.waitReady(t, opts.Tunnels)
 	return h
