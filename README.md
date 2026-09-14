@@ -14,15 +14,15 @@ just connect.
               └───────────────────────────────────────────┘           │
 ```
 
-The direction inverts: nothing dials into the home network. The agent dials
-**out** and holds one session open, and the server pushes a new multiplexed
-stream down it for each inbound connection.
+Nothing dials into the home network. The agent dials **out** and holds one
+session open; the server pushes a multiplexed stream down it for each inbound
+connection.
 
 ## Tunnel kinds
 
 | Kind | Routed by | Notes |
 |---|---|---|
-| `tcp` | a dedicated public port | Assigned from a range, then **reserved** — the same tunnel gets the same port back across reconnects and server restarts |
+| `tcp` | a dedicated public port | Assigned from a range, then **reserved** — the same tunnel gets the same port back across reconnects and restarts |
 | `http` | `Host` header | Proxied at L7, so `X-Forwarded-For`/`-Proto`, keep-alive and WebSocket upgrades work |
 | `minecraft` | hostname in the Java handshake | One port serves every Minecraft tunnel; the agent rewrites the handshake so players keep their real IPs |
 
@@ -59,52 +59,22 @@ go build -o lc  ./cmd/lc
 curl -H 'Host: web.mc.localhost' http://127.0.0.1:8080/
 ```
 
-## Custom domains
+## Documentation
 
-With `lcd -allow-custom-domains`, an agent can claim an unclaimed hostname at
-runtime, first-come-first-served:
-
-```sh
-./lc -config lc.json domains claim mc.example.com
-./lc -config lc.json domains list
-./lc -config lc.json domains release mc.example.com
-```
-
-Claiming only records ownership on the server. The name resolves — and a
-certificate can be issued for it — once **you** point its DNS at the server.
-
-## TLS
-
-`-tls` selects where certificates come from:
-
-- `autocert` — Let's Encrypt. The host allowlist is the set of claimed domains,
-  checked per handshake, so the server cannot be used to mint certificates for
-  names nobody owns.
-- `files` — a certificate and key you supply.
-- `selfsigned` — development. Exercises the real HTTPS path with no DNS and no
-  ACME round trip; clients must be told to trust the generated CA.
-
-## Running a Minecraft server behind it
-
-Real player IPs require the BungeeCord handshake rewrite, which the agent does
-automatically for `minecraft` tunnels. On the Minecraft server:
-
-```properties
-online-mode=false
-```
+| | |
+|---|---|
+| [Architecture](docs/architecture.md) | How it works and why it is shaped this way |
+| [Control protocol](docs/protocol.md) | The agent/server wire protocol |
+| [Running lc](docs/operations.md) | Flags, config, grants, TLS, idle timeouts |
+| [Minecraft](docs/minecraft.md) | Handshake routing, real player IPs, **and the `online-mode=false` warning** |
 
 > [!WARNING]
-> `online-mode=false` disables Mojang session verification. The whitelist then
-> matches on **username**, so anyone who can reach the server's port directly
-> can claim any username, whitelisted or not. **Firewall port 25565 so it is
-> reachable only through the tunnel** — that rule is the only thing making the
-> setup safe, and it is load-bearing.
->
-> The proper fix is for the tunnel to perform the Mojang handshake itself,
-> Velocity-style. That is not implemented.
-
-For players to type a bare hostname with no `:25565`, add an `SRV` record on
-`_minecraft._tcp`.
+> Running a Minecraft server behind this requires `online-mode=false`, which
+> disables Mojang session verification and makes the whitelist match on username
+> alone. A firewall restricting port 25565 to the tunnel is then the only thing
+> preventing trivial impersonation. Read
+> [the security section](docs/minecraft.md#security-online-modefalse-and-why-the-firewall-is-load-bearing)
+> before exposing a server.
 
 ## State
 
@@ -115,18 +85,26 @@ and shown only once, at creation.
 ## Tests
 
 ```sh
-go test ./...          # unit plus in-process end-to-end
+go test ./...
 go test -race ./...
 ```
 
 The end-to-end tests run a real server and agent over real sockets, including a
-fake Minecraft client and server, so no JVM is needed. For a manual check
-against a real `server.jar`, point a `minecraft` tunnel at it and join through
-the public hostname; `/list` should show real addresses rather than
-`127.0.0.1`.
+fake Minecraft client and server, so no JVM is needed.
 
-## Not implemented
+## Status
 
-Bedrock (it is UDP); the tunnel authenticating with Mojang; multi-server or HA.
-The web UI is not built either, but the registry is SQLite rather than a config
-file so that adding one later is a frontend over `internal/store`.
+Working today: raw TCP, HTTP and HTTPS with TLS termination, Minecraft with real
+player IPs, custom domain claims, durable port reservations, reconnection with
+backoff, per-tunnel connection caps and idle-connection reclamation.
+
+**The `lc` web UI is not built yet — it is planned.** The registry is SQLite
+rather than a config file specifically so that building it is a frontend over
+`internal/store`, not a migration: tokens are already hashed rather than stored
+in plaintext, and claim failures already carry typed reasons a UI can render.
+Until then, `lcd admin` and `lc domains` cover the same ground from the command
+line.
+
+Not planned: Bedrock (it is UDP), multi-server or HA. The tunnel authenticating
+with Mojang itself is not implemented but is the right fix if Minecraft tunnels
+are ever exposed to strangers — see [the Minecraft docs](docs/minecraft.md).
