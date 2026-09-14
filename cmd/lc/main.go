@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gabrielforster/lc/internal/agent"
 	"github.com/gabrielforster/lc/internal/muxproto"
@@ -22,6 +23,11 @@ type config struct {
 	Server  string                `json:"server"`
 	Token   string                `json:"token"`
 	Tunnels []muxproto.TunnelSpec `json:"tunnels"`
+	// IdleTimeout optionally closes connections to local services after this
+	// long without traffic, as a Go duration such as "15m". The server enforces
+	// its own timeout on the public side, so this is only needed to cover a
+	// local service holding a connection open after the server goes away.
+	IdleTimeout string `json:"idle_timeout,omitempty"`
 }
 
 func main() {
@@ -65,6 +71,19 @@ func load(path string) (config, error) {
 	return cfg, nil
 }
 
+// idleTimeout parses the optional duration, treating an empty value as
+// "disabled, the server's timeout is enough".
+func (c config) idleTimeout() (time.Duration, error) {
+	if c.IdleTimeout == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(c.IdleTimeout)
+	if err != nil {
+		return 0, fmt.Errorf("idle_timeout: %w", err)
+	}
+	return d, nil
+}
+
 func run(cfg config, debug bool) error {
 	level := slog.LevelInfo
 	if debug {
@@ -72,10 +91,16 @@ func run(cfg config, debug bool) error {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
+	idle, err := cfg.idleTimeout()
+	if err != nil {
+		return err
+	}
+
 	a := agent.New(agent.Config{
-		ServerAddr: cfg.Server,
-		Token:      cfg.Token,
-		Tunnels:    cfg.Tunnels,
+		ServerAddr:  cfg.Server,
+		Token:       cfg.Token,
+		Tunnels:     cfg.Tunnels,
+		IdleTimeout: idle,
 	}, log)
 
 	// Minecraft tunnels rewrite the handshake so the server sees the player's

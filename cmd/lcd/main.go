@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gabrielforster/lc/internal/registry"
 	"github.com/gabrielforster/lc/internal/server"
@@ -51,6 +52,7 @@ func serve(args []string) error {
 		certCache = fs.String("tls-cache", "lc-certs", "certificate cache directory, for -tls=autocert")
 		mcAddr    = fs.String("minecraft", "", "public Minecraft listener address, e.g. :25565, empty to disable")
 		maxConns  = fs.Int("max-conns", 256, "concurrent public connections allowed per tunnel, 0 for unlimited")
+		idleTO    = fs.Duration("idle-timeout", 15*time.Minute, "close proxied connections after this long without traffic, 0 to disable")
 		debug     = fs.Bool("debug", false, "verbose logging")
 	)
 	fs.Parse(args)
@@ -70,6 +72,7 @@ func serve(args []string) error {
 		ReservedHosts:      splitList(*resHost),
 		PublicHost:         *public,
 		MaxConnsPerTunnel:  *maxConns,
+		IdleTimeout:        *idleTO,
 	})
 
 	ln, err := net.Listen("tcp", *control)

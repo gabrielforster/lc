@@ -254,6 +254,11 @@ func (s *Server) pipe(public net.Conn, t *registry.Tunnel) {
 		public.Close()
 		return
 	}
+	// Idle tracking goes on the public side, where an abandoned peer actually
+	// sits. Closing it tears down the stream with it, so one wrapper reclaims
+	// the whole chain.
+	public = netutil.WithIdleTimeout(public, s.reg.Config().IdleTimeout)
+
 	// The yamux stream is wrapped so Join treats its Close as the half-close it
 	// actually is, rather than a full teardown.
 	netutil.Join(public, netutil.YamuxHalfCloser{Stream: stream.(*yamux.Stream)})

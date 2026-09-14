@@ -27,6 +27,13 @@ type Config struct {
 	Tunnels    []muxproto.TunnelSpec
 	// DialTLS, when set, is used instead of a plain TCP dial.
 	DialTLS func(ctx context.Context, addr string) (net.Conn, error)
+	// IdleTimeout closes a proxied connection to a local service after this
+	// long without traffic. Zero disables it.
+	//
+	// The server enforces its own timeout on the public side; this one covers
+	// the case where the server goes away while a local service holds the
+	// connection open.
+	IdleTimeout time.Duration
 }
 
 // Transform adapts the first bytes of a proxied connection before they reach
@@ -230,6 +237,8 @@ func (a *Agent) serveStream(stream *yamux.Stream) {
 			return
 		}
 	}
+
+	local = netutil.WithIdleTimeout(local, a.cfg.IdleTimeout)
 
 	netutil.Join(client, local)
 }

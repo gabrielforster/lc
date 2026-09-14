@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gabrielforster/lc/internal/muxproto"
 	"github.com/gabrielforster/lc/internal/store"
@@ -35,6 +36,13 @@ type Config struct {
 	// single busy or attacked tunnel cannot exhaust the home link on behalf of
 	// every other one. Zero means unlimited.
 	MaxConnsPerTunnel int
+	// IdleTimeout closes a proxied connection that has moved no bytes in
+	// either direction for this long, reclaiming the resources held by peers
+	// that vanished without closing. Zero disables it.
+	//
+	// It cannot distinguish a dead peer from a quiet one, so it must be
+	// generous enough for the protocols carried.
+	IdleTimeout time.Duration
 }
 
 // Registry is safe for concurrent use.

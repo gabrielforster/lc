@@ -54,6 +54,8 @@ type Options struct {
 	Minecraft bool
 	// MaxConnsPerTunnel caps concurrent public connections per tunnel.
 	MaxConnsPerTunnel int
+	// IdleTimeout closes proxied connections after this long without traffic.
+	IdleTimeout time.Duration
 }
 
 // Start brings up a server and an agent and waits until the tunnels are live.
@@ -86,6 +88,7 @@ func Start(t *testing.T, opts Options) *Harness {
 		AllowCustomDomains: opts.AllowCustomDomains,
 		PublicHost:         "127.0.0.1",
 		MaxConnsPerTunnel:  opts.MaxConnsPerTunnel,
+		IdleTimeout:        opts.IdleTimeout,
 	})
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -137,9 +140,10 @@ func Start(t *testing.T, opts Options) *Harness {
 	}
 
 	ag := agent.New(agent.Config{
-		ServerAddr: ln.Addr().String(),
-		Token:      secret,
-		Tunnels:    opts.Tunnels,
+		ServerAddr:  ln.Addr().String(),
+		Token:       secret,
+		Tunnels:     opts.Tunnels,
+		IdleTimeout: opts.IdleTimeout,
 	}, log)
 	for kind, tf := range opts.Transforms {
 		ag.SetTransform(kind, tf)
