@@ -29,6 +29,11 @@ type Harness struct {
 	ControlAddr string
 	// HTTPAddr is the public HTTP frontend, set when Options.HTTP is true.
 	HTTPAddr string
+	// HTTPSAddr is the public TLS frontend, set when Options.HTTPS is true.
+	HTTPSAddr string
+	// Certs is the self-signed source backing HTTPSAddr; its RootCAs must be
+	// trusted by any test client.
+	Certs *server.SelfSigned
 }
 
 // Options tunes the harness for a test.
@@ -40,6 +45,8 @@ type Options struct {
 	Transforms         map[muxproto.Kind]agent.Transform
 	// HTTP starts the public HTTP frontend.
 	HTTP bool
+	// HTTPS starts the public TLS frontend with a self-signed cert source.
+	HTTPS bool
 }
 
 // Start brings up a server and an agent and waits until the tunnels are live.
@@ -94,6 +101,23 @@ func Start(t *testing.T, opts Options) *Harness {
 		go srv.ServeHTTPListener(ctx, hln)
 	}
 
+	var (
+		httpsAddr string
+		certs     *server.SelfSigned
+	)
+	if opts.HTTPS {
+		certs, err = server.NewSelfSigned()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpsAddr = sln.Addr().String()
+		go srv.ServeHTTPSListener(ctx, sln, certs)
+	}
+
 	ag := agent.New(agent.Config{
 		ServerAddr: ln.Addr().String(),
 		Token:      secret,
@@ -106,7 +130,7 @@ func Start(t *testing.T, opts Options) *Harness {
 
 	h := &Harness{
 		Server: srv, Agent: ag, Registry: reg, DB: db,
-		Token: secret, ControlAddr: ln.Addr().String(), HTTPAddr: httpAddr,
+		Token: secret, ControlAddr: ln.Addr().String(), HTTPAddr: httpAddr, HTTPSAddr: httpsAddr, Certs: certs,
 	}
 	h.waitReady(t, opts.Tunnels)
 	return h
