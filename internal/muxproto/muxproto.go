@@ -210,3 +210,12 @@ func (r *Reader) Read(out any) error {
 	}
 	return json.Unmarshal(env.Body, out)
 }
+
+// Buffered returns the underlying reader, positioned after the last decoded
+// message.
+//
+// Decoding a frame can pull bytes behind it into the buffer. A caller that
+// switches from control frames to raw payload on the same stream -- as the
+// agent does after reading StreamInit -- must keep reading through this, or
+// those buffered bytes are silently dropped.
+func (r *Reader) Buffered() io.Reader { return r.br }
