@@ -1,0 +1,5 @@
+/lc
+/lcd
+*.db
+*.db-shm
+*.db-wal
