@@ -52,6 +52,8 @@ type Options struct {
 	HTTPS bool
 	// Minecraft starts a sniffing L4 frontend routing by handshake hostname.
 	Minecraft bool
+	// MaxConnsPerTunnel caps concurrent public connections per tunnel.
+	MaxConnsPerTunnel int
 }
 
 // Start brings up a server and an agent and waits until the tunnels are live.
@@ -83,6 +85,7 @@ func Start(t *testing.T, opts Options) *Harness {
 		PortMax:            opts.PortMax,
 		AllowCustomDomains: opts.AllowCustomDomains,
 		PublicHost:         "127.0.0.1",
+		MaxConnsPerTunnel:  opts.MaxConnsPerTunnel,
 	})
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

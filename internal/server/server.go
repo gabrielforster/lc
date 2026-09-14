@@ -239,6 +239,15 @@ func Dial(t *registry.Tunnel, clientAddr string) (net.Conn, error) {
 
 // pipe joins a public connection to a freshly opened agent stream.
 func (s *Server) pipe(public net.Conn, t *registry.Tunnel) {
+	// The cap is checked before dialling, so a flood costs nothing on the home
+	// link rather than being absorbed and then dropped.
+	if !t.Acquire() {
+		s.log.Warn("tunnel at connection limit", "tunnel", t.Name, "conns", t.Conns())
+		public.Close()
+		return
+	}
+	defer t.Release()
+
 	stream, err := Dial(t, public.RemoteAddr().String())
 	if err != nil {
 		s.log.Warn("open stream failed", "tunnel", t.Name, "err", err)

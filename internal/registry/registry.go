@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gabrielforster/lc/internal/muxproto"
 	"github.com/gabrielforster/lc/internal/store"
@@ -30,6 +31,10 @@ type Config struct {
 	// PublicHost is the address users reach the server on, used to render the
 	// public address of a tcp tunnel.
 	PublicHost string
+	// MaxConnsPerTunnel caps concurrent public connections to one tunnel, so a
+	// single busy or attacked tunnel cannot exhaust the home link on behalf of
+	// every other one. Zero means unlimited.
+	MaxConnsPerTunnel int
 }
 
 // Registry is safe for concurrent use.
@@ -57,7 +62,33 @@ type Tunnel struct {
 	// Session is the agent's yamux session. Opening a stream on it reaches the
 	// agent that registered this tunnel.
 	Session *yamux.Session
+
+	// conns counts live public connections, for the per-tunnel cap.
+	conns atomic.Int64
+	// max is the cap at registration time, copied so it travels with the
+	// tunnel rather than being re-read from config on every connection.
+	max int64
 }
+
+// Acquire reserves a connection slot, reporting whether the tunnel is under its
+// cap. A caller that gets true must call Release when the connection ends.
+func (t *Tunnel) Acquire() bool {
+	if t.max <= 0 {
+		t.conns.Add(1)
+		return true
+	}
+	if t.conns.Add(1) > t.max {
+		t.conns.Add(-1)
+		return false
+	}
+	return true
+}
+
+// Release returns a slot taken by Acquire.
+func (t *Tunnel) Release() { t.conns.Add(-1) }
+
+// Conns reports live public connections, for logging and status output.
+func (t *Tunnel) Conns() int64 { return t.conns.Load() }
 
 func New(db *store.DB, cfg Config) *Registry {
 	return &Registry{
@@ -92,6 +123,7 @@ func (r *Registry) Register(tok store.Token, sess *yamux.Session, spec muxproto.
 		Kind:    spec.Kind,
 		TokenID: tok.ID,
 		Session: sess,
+		max:     int64(r.cfg.MaxConnsPerTunnel),
 	}
 
 	switch spec.Kind {
