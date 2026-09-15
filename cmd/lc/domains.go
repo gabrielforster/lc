@@ -7,26 +7,117 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/gabrielforster/lc/internal/agent"
 	"github.com/gabrielforster/lc/internal/muxproto"
 )
 
-// domains implements the one-shot `lc domains ...` commands.
-//
-// They exist so the claim flow is usable before any UI does: each connects a
-// short-lived session, issues one control request and exits.
-func domains(cfg config, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: lc domains <claim|list|release> [domain]")
+// The domains commands exist so the claim flow is usable before any UI does:
+// each connects a short-lived session, issues one control request and exits.
+func newDomainsCmd(path *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "domains",
+		Short: "Claim, list and release custom domains",
+		Long: "Custom domains are claimed at runtime, against a server started with\n" +
+			"--allow-custom-domains. A claim is durable: the hostname stays yours\n" +
+			"across reconnects until you release it.",
+	}
+	cmd.AddCommand(
+		newClaimCmd(path),
+		newDomainsListCmd(path),
+		newReleaseCmd(path),
+	)
+	return cmd
+}
+
+func newClaimCmd(path *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "claim <domain>",
+		Short: "Claim a hostname for this token",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withSession(cmd.Context(), *path, func(a *agent.Agent) error {
+				domain := args[0]
+				res, err := a.ClaimDomain(domain)
+				if err != nil {
+					return err
+				}
+				if !res.OK {
+					return fmt.Errorf("claim refused: %s", explain(res.Reason, domain))
+				}
+				fmt.Printf("claimed %s\n", domain)
+				if res.NeedsDNS {
+					// A claim records ownership; nothing resolves, and no
+					// certificate can be issued, until DNS points here.
+					fmt.Printf("\nPoint %s at this server's address before it will resolve.\n", domain)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func newDomainsListCmd(path *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List the hostnames this token has claimed",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return withSession(cmd.Context(), *path, func(a *agent.Agent) error {
+				hosts, err := a.Domains()
+				if err != nil {
+					return err
+				}
+				if len(hosts) == 0 {
+					fmt.Println("no domains claimed")
+					return nil
+				}
+				for _, h := range hosts {
+					fmt.Println(h)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func newReleaseCmd(path *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "release <domain>",
+		Short: "Give a claimed hostname back",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withSession(cmd.Context(), *path, func(a *agent.Agent) error {
+				domain := args[0]
+				res, err := a.ReleaseDomain(domain)
+				if err != nil {
+					return err
+				}
+				if !res.OK {
+					return fmt.Errorf("release failed: %s", explain(res.Reason, domain))
+				}
+				fmt.Printf("released %s\n", domain)
+				return nil
+			})
+		},
+	}
+}
+
+// withSession runs one request over a short-lived session. Registering no
+// tunnels keeps it to the control stream.
+func withSession(parent context.Context, path string, fn func(*agent.Agent) error) error {
+	cfg, err := load(path)
+	if err != nil {
+		return err
 	}
 
-	// A one-shot command registers no tunnels; it only needs the control stream.
 	a := agent.New(agent.Config{
 		ServerAddr: cfg.Server,
 		Token:      cfg.Token,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 
 	errc := make(chan error, 1)
@@ -48,56 +139,7 @@ func domains(cfg config, args []string) error {
 			return fmt.Errorf("connecting to %s: %w", cfg.Server, err)
 		}
 	}
-
-	switch args[0] {
-	case "claim":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: lc domains claim <domain>")
-		}
-		res, err := a.ClaimDomain(args[1])
-		if err != nil {
-			return err
-		}
-		if !res.OK {
-			return fmt.Errorf("claim refused: %s", explain(res.Reason, args[1]))
-		}
-		fmt.Printf("claimed %s\n", args[1])
-		if res.NeedsDNS {
-			// Claiming only records ownership on the server; nothing resolves
-			// until DNS points here, and no certificate can be issued either.
-			fmt.Printf("\nPoint %s at this server's address before it will resolve.\n", args[1])
-		}
-		return nil
-
-	case "list":
-		hosts, err := a.Domains()
-		if err != nil {
-			return err
-		}
-		if len(hosts) == 0 {
-			fmt.Println("no domains claimed")
-			return nil
-		}
-		for _, h := range hosts {
-			fmt.Println(h)
-		}
-		return nil
-
-	case "release":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: lc domains release <domain>")
-		}
-		res, err := a.ReleaseDomain(args[1])
-		if err != nil {
-			return err
-		}
-		if !res.OK {
-			return fmt.Errorf("release failed: %s", explain(res.Reason, args[1]))
-		}
-		fmt.Printf("released %s\n", args[1])
-		return nil
-	}
-	return fmt.Errorf("unknown domains command %q", args[0])
+	return fn(a)
 }
 
 // explain turns a typed reason into something worth reading.
@@ -108,7 +150,7 @@ func explain(r muxproto.ClaimReason, domain string) string {
 	case muxproto.ClaimReserved:
 		return fmt.Sprintf("%s is reserved by the server", domain)
 	case muxproto.ClaimDisabled:
-		return "this server was not started with -allow-custom-domains"
+		return "this server was not started with --allow-custom-domains"
 	case muxproto.ClaimNotFound:
 		return fmt.Sprintf("you do not own %s", domain)
 	case muxproto.ClaimInvalid:

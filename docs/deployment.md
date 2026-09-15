@@ -33,11 +33,11 @@ Only open what you actually enable.
 
 | Port | Flag | Who reaches it | Required |
 |---|---|---|---|
-| `7000` | `-control` | The agent only | Always |
-| `80` | `-http` | Everyone | For HTTP tunnels, and for ACME challenges |
-| `443` | `-https` | Everyone | For HTTPS tunnels |
-| `25565` | `-minecraft` | Players | For Minecraft tunnels |
-| `20000-20100` | `-port-min` / `-port-max` | Everyone | For `tcp` tunnels |
+| `7000` | `--control` | The agent only | Always |
+| `80` | `--http` | Everyone | For HTTP tunnels, and for ACME challenges |
+| `443` | `--https` | Everyone | For HTTPS tunnels |
+| `25565` | `--minecraft` | Players | For Minecraft tunnels |
+| `20000-20100` | `--port-min` / `--port-max` | Everyone | For `tcp` tunnels |
 
 Narrow the control port to the agent's address if it is static. It is the only
 port where a leaked token is directly useful:
@@ -67,10 +67,17 @@ sudo useradd --system --home /var/lib/lc --create-home lc
 `CGO_ENABLED=0` is deliberate: the SQLite driver is pure Go, so the binary is
 static and can be built anywhere and copied to the VPS.
 
+Optionally install shell completion for the subcommands, flags and the `--tls`
+and `--kind` value sets:
+
+```sh
+lcd completion bash | sudo tee /etc/bash_completion.d/lcd >/dev/null
+```
+
 Mint a credential for the agent:
 
 ```sh
-sudo -u lc lcd admin token -db /var/lib/lc/lc.db -label home
+sudo -u lc lcd admin token --db /var/lib/lc/lc.db --label home
 # token id: 1
 # secret:   3f9a...    <- shown once; copy it now
 ```
@@ -93,14 +100,14 @@ User=lc
 Group=lc
 WorkingDirectory=/var/lib/lc
 ExecStart=/usr/local/bin/lcd \
-  -db /var/lib/lc/lc.db \
-  -control :7000 \
-  -http :80 \
-  -https :443 \
-  -minecraft :25565 \
-  -public-host tunnel.example.com \
-  -tls autocert \
-  -tls-cache /var/lib/lc/certs
+  --db /var/lib/lc/lc.db \
+  --control :7000 \
+  --http :80 \
+  --https :443 \
+  --minecraft :25565 \
+  --public-host tunnel.example.com \
+  --tls autocert \
+  --tls-cache /var/lib/lc/certs
 Restart=always
 RestartSec=5s
 
@@ -144,18 +151,18 @@ tunnel.example.com.      IN A     203.0.113.5
 *.tunnel.example.com.    IN A     203.0.113.5
 ```
 
-Then run with the domain as `-public-host`. To let agents claim their own
-subdomains at runtime, add `-allow-custom-domains`, and reserve any name the
+Then run with the domain as `--public-host`. To let agents claim their own
+subdomains at runtime, add `--allow-custom-domains`, and reserve any name the
 server itself uses:
 
 ```sh
-lcd ... -public-host tunnel.example.com \
-        -allow-custom-domains \
-        -reserved-hosts tunnel.example.com
+lcd ... --public-host tunnel.example.com \
+        --allow-custom-domains \
+        --reserved-hosts tunnel.example.com
 ```
 
 A token granted `wildcard .tunnel.example.com` can then register anything below
-it. With `-tls autocert`, certificates are issued on first request for any
+it. With `--tls autocert`, certificates are issued on first request for any
 claimed name — the allowlist is read from the claims table, so the server cannot
 be used to mint certificates for names nobody owns.
 
@@ -188,7 +195,7 @@ hostname:
 {"name": "ssh", "kind": "tcp", "local_addr": "127.0.0.1:22"}
 ```
 
-Users connect to `203.0.113.5:20000`. Run `lcd -public-host 203.0.113.5` so the
+Users connect to `203.0.113.5:20000`. Run `lcd --public-host 203.0.113.5` so the
 address reported back to the agent is the one users should actually use.
 
 **`http` and `minecraft` tunnels work too, using the IP as the hostname.** This
@@ -201,7 +208,7 @@ whatever the player typed into its handshake. So set `host` to the server's IP:
 ```
 
 ```sh
-lcd admin grant -token 1 -kind host -value 203.0.113.5
+lcd admin grant --token 1 --kind host --value 203.0.113.5
 ```
 
 Players connect to `203.0.113.5` directly, and real player IPs are still
@@ -224,15 +231,15 @@ is the only hostname you have. So pick one — HTTP **or** Minecraft — and use
 
 ### No public HTTPS
 
-Let's Encrypt does not issue certificates for bare IP addresses, so `-tls
+Let's Encrypt does not issue certificates for bare IP addresses, so `--tls
 autocert` cannot work without a domain. The options:
 
 - **Plain HTTP.** Fine for something behind a VPN or for testing; do not send
   credentials over it.
-- **`-tls selfsigned`.** Real TLS, but browsers show a warning and clients need
+- **`--tls selfsigned`.** Real TLS, but browsers show a warning and clients need
   the CA added explicitly. Reasonable for a private API, useless for anything a
   browser visits casually.
-- **`-tls files`** with a certificate from elsewhere, which still needs a name.
+- **`--tls files`** with a certificate from elsewhere, which still needs a name.
 
 ### A middle ground: wildcard DNS services
 
@@ -299,7 +306,7 @@ Wants=network-online.target
 [Service]
 User=lc-agent
 Group=lc-agent
-ExecStart=/usr/local/bin/lc -config /etc/lc/lc.json
+ExecStart=/usr/local/bin/lc --config /etc/lc/lc.json
 Restart=always
 RestartSec=5s
 
@@ -354,7 +361,7 @@ tradeoff.
 On the server:
 
 ```sh
-sudo -u lc lcd admin list -db /var/lib/lc/lc.db   # tokens, grants, domains, ports
+sudo -u lc lcd admin list --db /var/lib/lc/lc.db   # tokens, grants, domains, ports
 journalctl -u lcd | grep "tunnel open"
 ```
 
@@ -374,7 +381,8 @@ There is no status endpoint yet
 | Symptom | Cause |
 |---|---|
 | `conflict: host already served by a live tunnel` | Two tunnels claim one hostname. Another agent holds it, or you hit [#11](https://github.com/gabrielforster/lc/issues/11) with an `http` and a `minecraft` tunnel on the same name |
-| `auth: unknown or disabled token` | Wrong secret, or the wrong `-db` file. The agent stops rather than retrying |
+| `unknown shorthand flag: 'c' in -control` | A command line from before the cobra migration. Flags take two dashes now: `--control`. The binary says so under the error |
+| `auth: unknown or disabled token` | Wrong secret, or the wrong `--db` file. The agent stops rather than retrying |
 | `forbidden` on registration | No grant covers the hostname or port. Check `lcd admin list` |
 | `502` from an HTTP tunnel | No agent connected for that hostname, or the local service is down |
 | A Minecraft client cannot connect | The hostname it typed must match the tunnel's `host` exactly — that string is the routing key |

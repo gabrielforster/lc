@@ -5,13 +5,16 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/gabrielforster/lc/internal/agent"
 	"github.com/gabrielforster/lc/internal/muxproto"
@@ -23,37 +26,65 @@ type config struct {
 	Server  string                `json:"server"`
 	Token   string                `json:"token"`
 	Tunnels []muxproto.TunnelSpec `json:"tunnels"`
-	// IdleTimeout optionally closes connections to local services after this
-	// long without traffic, as a Go duration such as "15m". The server enforces
-	// its own timeout on the public side, so this is only needed to cover a
-	// local service holding a connection open after the server goes away.
+	// IdleTimeout, a Go duration such as "15m", closes connections to local
+	// services after that long without traffic. The server enforces its own on
+	// the public side, so this only covers a local service that holds on after
+	// the server goes away.
 	IdleTimeout string `json:"idle_timeout,omitempty"`
 }
 
 func main() {
-	fs := flag.NewFlagSet("lc", flag.ExitOnError)
-	var (
-		path  = fs.String("config", "lc.json", "path to the agent config file")
-		debug = fs.Bool("debug", false, "verbose logging")
-	)
-	fs.Parse(os.Args[1:])
-
-	if err := dispatch(*path, *debug, fs.Args()); err != nil {
+	if err := newRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "lc:", err)
+		hintDoubleDash(os.Stderr, os.Args[1:])
 		os.Exit(1)
 	}
 }
 
-// dispatch chooses between running the agent and the one-shot subcommands.
-func dispatch(path string, debug bool, args []string) error {
-	cfg, err := load(path)
-	if err != nil {
-		return err
+// hintDoubleDash covers the one breaking change in moving to cobra: pflag wants
+// two dashes, and "unknown shorthand flag" does not say so.
+func hintDoubleDash(w io.Writer, args []string) {
+	for _, a := range args {
+		if len(a) > 2 && a[0] == '-' && a[1] != '-' {
+			fmt.Fprintf(w, "\nFlags now take two dashes: --%s\n", strings.TrimLeft(a, "-"))
+			return
+		}
 	}
-	if len(args) > 0 && args[0] == "domains" {
-		return domains(cfg, args[1:])
+}
+
+func newRootCmd() *cobra.Command {
+	var (
+		path  string
+		debug bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "lc",
+		Short: "Reverse tunnel agent",
+		Long: "lc is the agent half of lc. It runs on the machine behind NAT, dials out\n" +
+			"to an lcd server and holds one session open for it to push traffic down.",
+		Args: cobra.NoArgs,
+		// main prints errors, prefixed with the binary name. Usage is worth
+		// printing for a bad command line but not for a runtime failure, and by
+		// PersistentPreRun cobra has finished parsing.
+		SilenceErrors:    true,
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) { cmd.Root().SilenceUsage = true },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := load(path)
+			if err != nil {
+				return err
+			}
+			return run(cmd.Context(), cfg, debug)
+		},
 	}
-	return run(cfg, debug)
+
+	// Persistent: the subcommands read the same config file.
+	f := cmd.PersistentFlags()
+	f.StringVar(&path, "config", "lc.json", "path to the agent config file")
+	f.BoolVar(&debug, "debug", false, "verbose logging")
+
+	cmd.AddCommand(newDomainsCmd(&path))
+	return cmd
 }
 
 func load(path string) (config, error) {
@@ -84,7 +115,7 @@ func (c config) idleTimeout() (time.Duration, error) {
 	return d, nil
 }
 
-func run(cfg config, debug bool) error {
+func run(parent context.Context, cfg config, debug bool) error {
 	level := slog.LevelInfo
 	if debug {
 		level = slog.LevelDebug
@@ -107,7 +138,7 @@ func run(cfg config, debug bool) error {
 	// real address. Every other kind is piped through untouched.
 	a.SetTransform(muxproto.KindMinecraft, agent.MinecraftTransform)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	log.Info("connecting", "server", cfg.Server, "tunnels", len(cfg.Tunnels))

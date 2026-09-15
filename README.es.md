@@ -35,11 +35,11 @@ go build -o lcd ./cmd/lcd
 go build -o lc  ./cmd/lc
 
 # Genera una credencial y concédele lo que puede reclamar.
-./lcd admin token -label laptop            # muestra el secreto una sola vez
-./lcd admin grant -token 1 -kind port_auto
-./lcd admin grant -token 1 -kind wildcard -value .mc.localhost
+./lcd admin token --label laptop            # muestra el secreto una sola vez
+./lcd admin grant --token 1 --kind port_auto
+./lcd admin grant --token 1 --kind wildcard --value .mc.localhost
 
-./lcd -control 127.0.0.1:7000 -http 127.0.0.1:8080 -minecraft 127.0.0.1:25565
+./lcd --control 127.0.0.1:7000 --http 127.0.0.1:8080 --minecraft 127.0.0.1:25565
 ```
 
 `lc.json` en la máquina detrás del NAT:
@@ -57,9 +57,18 @@ go build -o lc  ./cmd/lc
 ```
 
 ```sh
-./lc -config lc.json
+./lc --config lc.json
 curl -H 'Host: web.mc.localhost' http://127.0.0.1:8080/
 ```
+
+Ambos los binarios son árboles de comandos de cobra — `lcd --help`,
+`lcd admin grant --help`, `lc domains --help` — e incluyen autocompletado para
+la shell mediante `lcd completion zsh`.
+
+> [!IMPORTANT]
+> Las flags llevan **dos** guiones: `--control :7000`, no `-control :7000`. Si
+> tienes algún script anterior a la migración a cobra, ese es el único cambio que
+> necesita.
 
 ## Documentación
 
@@ -70,7 +79,7 @@ curl -H 'Host: web.mc.localhost' http://127.0.0.1:8080/
 | [Despliegue](docs/deployment.md) | Configuración de la VPS, systemd, firewall, con y sin dominio |
 | [Arquitectura](docs/architecture.md) | Cómo funciona y por qué tiene esta forma |
 | [Protocolo de control](docs/protocol.md) | El protocolo entre agente y servidor |
-| [Ejecutar lc](docs/operations.md) | Flags, configuración, permisos, TLS, tiempos de inactividad |
+| [Ejecutar lc](docs/operations.md) | La línea de comandos, flags, configuración, permisos, TLS, tiempos de inactividad |
 | [Minecraft](docs/minecraft.md) | Enrutado por handshake, IP reales de los jugadores **y la advertencia sobre `online-mode=false`** |
 
 > [!WARNING]
@@ -84,7 +93,7 @@ curl -H 'Host: web.mc.localhost' http://127.0.0.1:8080/
 
 ## Estado persistente
 
-El estado del servidor vive en un archivo SQLite (`-db`, por defecto `lc.db`):
+El estado del servidor vive en un archivo SQLite (`--db`, por defecto `lc.db`):
 tokens, sus permisos, dominios reclamados y reservas de puertos. Los secretos de
 los tokens se guardan con hash y se muestran una sola vez, al crearlos.
 

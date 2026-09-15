@@ -1,24 +1,69 @@
 # Running lc
 
+## The command line
+
+Both binaries are [cobra](https://github.com/spf13/cobra) command trees, so
+`--help` works at every level and describes exactly the command you asked about:
+
+```
+lcd                          run the server
+lcd admin token              mint a credential
+lcd admin grant              allow a token to claim a host, zone or port
+lcd admin list               tokens with their grants, domains and ports
+lcd completion <shell>       shell completion script
+
+lc                           run the agent
+lc domains claim <domain>    claim a hostname
+lc domains list              hostnames this token has claimed
+lc domains release <domain>  give one back
+lc completion <shell>        shell completion script
+```
+
+> [!IMPORTANT]
+> **Flags take two dashes.** cobra parses with pflag, which follows POSIX: a
+> single dash introduces short flags only, so `-control :7000` is read as the
+> shorthand flags `-c -o -n ...` and rejected. Write `--control :7000`.
+>
+> Versions before the cobra migration accepted a single dash. If you have a
+> systemd unit or script from then, this is the only change it needs — and the
+> binaries detect it, so the error tells you what to write instead:
+>
+> ```
+> $ lcd -control :7000
+> lcd: unknown shorthand flag: 'c' in -control
+>
+> Flags now take two dashes: --control
+> ```
+
+Completion covers subcommands, flag names and the value sets for `--tls` and
+`lcd admin grant --kind`:
+
+```sh
+lcd completion zsh  > "${fpath[1]}/_lcd"
+lc  completion zsh  > "${fpath[1]}/_lc"
+# bash, fish and powershell are also available; each prints its own install
+# instructions under `completion <shell> --help`.
+```
+
 ## Server flags (`lcd`)
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `-db` | `lc.db` | SQLite state file |
-| `-control` | `:7000` | Where agents connect |
-| `-http` | `:8080` | Public HTTP listener, empty to disable |
-| `-https` | *(off)* | Public HTTPS listener |
-| `-minecraft` | *(off)* | Public Minecraft listener, e.g. `:25565` |
-| `-port-min`, `-port-max` | `20000`, `20100` | Range for automatically assigned TCP ports |
-| `-public-host` | `127.0.0.1` | Hostname users reach this server on, used when reporting a tcp tunnel's address |
-| `-allow-custom-domains` | `false` | Let agents claim unreserved hostnames |
-| `-reserved-hosts` | *(none)* | Comma-separated names the server keeps for itself |
-| `-max-conns` | `256` | Concurrent public connections per tunnel, 0 for unlimited |
-| `-idle-timeout` | `15m` | Close proxied connections after this long without traffic, 0 to disable |
-| `-tls` | `autocert` | `autocert`, `files` or `selfsigned` |
-| `-tls-cert`, `-tls-key` | | Certificate and key, for `-tls=files` |
-| `-tls-cache` | `lc-certs` | Certificate cache directory, for `-tls=autocert` |
-| `-debug` | `false` | Verbose logging |
+| `--db` | `lc.db` | SQLite state file |
+| `--control` | `:7000` | Where agents connect |
+| `--http` | `:8080` | Public HTTP listener, empty to disable |
+| `--https` | *(off)* | Public HTTPS listener |
+| `--minecraft` | *(off)* | Public Minecraft listener, e.g. `:25565` |
+| `--port-min`, `--port-max` | `20000`, `20100` | Range for automatically assigned TCP ports |
+| `--public-host` | `127.0.0.1` | Hostname users reach this server on, used when reporting a tcp tunnel's address |
+| `--allow-custom-domains` | `false` | Let agents claim unreserved hostnames |
+| `--reserved-hosts` | *(none)* | Comma-separated names the server keeps for itself |
+| `--max-conns` | `256` | Concurrent public connections per tunnel, 0 for unlimited |
+| `--idle-timeout` | `15m` | Close proxied connections after this long without traffic, 0 to disable |
+| `--tls` | `autocert` | `autocert`, `files` or `selfsigned` |
+| `--tls-cert`, `--tls-key` | | Certificate and key, for `--tls=files` |
+| `--tls-cache` | `lc-certs` | Certificate cache directory, for `--tls=autocert` |
+| `--debug` | `false` | Verbose logging |
 
 ## Agent config (`lc.json`)
 
@@ -50,9 +95,9 @@ Tokens and grants live in the SQLite file. Until the UI exists, `lcd admin`
 manages them:
 
 ```sh
-lcd admin token -label laptop          # mint a credential, printing the secret once
-lcd admin grant -token 1 -kind port_auto
-lcd admin grant -token 1 -kind wildcard -value .mc.example.com
+lcd admin token --label laptop          # mint a credential, printing the secret once
+lcd admin grant --token 1 --kind port_auto
+lcd admin grant --token 1 --kind wildcard --value .mc.example.com
 lcd admin list                         # tokens with their grants, domains and ports
 ```
 
@@ -86,10 +131,10 @@ blipped.
 A peer that vanishes — a closed laptop, a dropped NAT mapping, a crashed client
 — never sends a FIN. Nothing errors; the connection simply sits there holding a
 public socket, a yamux stream and a socket to the local service, and counting
-against `-max-conns`. Because nothing fails, this is invisible until resources
+against `--max-conns`. Because nothing fails, this is invisible until resources
 run out.
 
-`-idle-timeout` closes connections that have moved no bytes in either direction
+`--idle-timeout` closes connections that have moved no bytes in either direction
 for that long. Traffic in **either** direction counts, so a long transfer is
 never interrupted. The server reclaims on its own: it does not depend on the
 local service noticing anything, so a service that holds connections open
@@ -107,7 +152,7 @@ is the tradeoff to be aware of:
 - **HTTP** is safe — pooled connections are closed by the transport's own
   90-second idle timeout well before this one applies.
 - **SSH, database sessions and similar** can legitimately sit silent for hours.
-  Raise `-idle-timeout`, disable it with `0`, or enable the protocol's own
+  Raise `--idle-timeout`, disable it with `0`, or enable the protocol's own
   keepalive (`ServerAliveInterval` for SSH).
 
 ## TLS
@@ -123,13 +168,13 @@ becomes eligible once it is claimed *and* its DNS points at the server.
 
 ## Custom domains
 
-With `-allow-custom-domains`, an agent can claim an unclaimed hostname at
+With `--allow-custom-domains`, an agent can claim an unclaimed hostname at
 runtime, first-come-first-served:
 
 ```sh
-lc -config lc.json domains claim mc.example.com
-lc -config lc.json domains list
-lc -config lc.json domains release mc.example.com
+lc --config lc.json domains claim mc.example.com
+lc --config lc.json domains list
+lc --config lc.json domains release mc.example.com
 ```
 
 A refusal says why: `taken`, `reserved`, `disabled` or `invalid`.
@@ -144,6 +189,6 @@ issued for it either.
 |---|---|
 | `tunnel open` / `tunnel closed` | An agent registered or disconnected |
 | `conflict: host already served by a live tunnel` | Two agents claim one hostname; the second retries until the first disconnects |
-| `tunnel at connection limit` | `-max-conns` reached; connections are refused before the agent is dialled |
+| `tunnel at connection limit` | `--max-conns` reached; connections are refused before the agent is dialled |
 | `no tunnel for host` | Someone reached a listener with a hostname nobody serves |
 | `local dial failed` | The agent could not reach the local service — usually it is not running |
