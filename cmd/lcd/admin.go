@@ -50,12 +50,10 @@ func newTokenCmd(dbPath *string) *cobra.Command {
 	var label string
 
 	cmd := &cobra.Command{
-		Use:           "token",
-		Short:         "Mint a new token",
-		Long:          "Creates a credential and prints its secret once. Only the hash is stored.",
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:   "token",
+		Short: "Mint a new token",
+		Long:  "Creates a credential and prints its secret once. Only the hash is stored.",
+		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return open(*dbPath, func(db *store.DB) error {
 				tok, secret, err := db.CreateToken(label)
@@ -85,9 +83,7 @@ func newGrantCmd(dbPath *string) *cobra.Command {
 		Example: "  lcd admin grant --token 1 --kind port_auto\n" +
 			"  lcd admin grant --token 1 --kind wildcard --value .mc.example.com\n" +
 			"  lcd admin grant --token 1 --kind host --value play.example.com",
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return open(*dbPath, func(db *store.DB) error {
 				if err := db.AddGrant(id, store.GrantKind(kind), value); err != nil {
@@ -112,11 +108,9 @@ func newGrantCmd(dbPath *string) *cobra.Command {
 
 func newListCmd(dbPath *string) *cobra.Command {
 	return &cobra.Command{
-		Use:           "list",
-		Short:         "List tokens with their grants, domains and reserved ports",
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:   "list",
+		Short: "List tokens with their grants, domains and reserved ports",
+		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return open(*dbPath, func(db *store.DB) error {
 				tokens, err := db.ListTokens()

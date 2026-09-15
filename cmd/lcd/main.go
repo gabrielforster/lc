@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -24,7 +25,21 @@ import (
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "lcd:", err)
+		hintDoubleDash(os.Stderr, os.Args[1:])
 		os.Exit(1)
+	}
+}
+
+// hintDoubleDash softens the one breaking change in moving to cobra. Flags used
+// to parse with a single dash; pflag follows POSIX, where a single dash
+// introduces short flags only. A stale command line therefore fails with a
+// message about shorthand flags, which does not obviously mean "add a dash".
+func hintDoubleDash(w io.Writer, args []string) {
+	for _, a := range args {
+		if len(a) > 2 && a[0] == '-' && a[1] != '-' {
+			fmt.Fprintf(w, "\nFlags now take two dashes: --%s\n", strings.TrimLeft(a, "-"))
+			return
+		}
 	}
 }
 
@@ -59,9 +74,14 @@ func newRootCmd() *cobra.Command {
 		Short: "Reverse tunnel server",
 		Long: "lcd is the server half of lc. It runs on a host with a public address,\n" +
 			"accepts sessions from agents behind NAT, and routes public traffic down them.",
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
+		Args: cobra.NoArgs,
+		// Errors are printed once, by main, with the binary's name in front.
 		SilenceErrors: true,
+		// Usage is worth printing when the command line itself is wrong, which
+		// cobra has already finished checking by the time this runs; a failure
+		// after it is a runtime one, and dumping the flag list at it only buries
+		// the message.
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) { cmd.Root().SilenceUsage = true },
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return serve(cmd.Context(), o)
 		},
