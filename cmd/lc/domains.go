@@ -48,9 +48,8 @@ func newClaimCmd(path *string) *cobra.Command {
 				}
 				fmt.Printf("claimed %s\n", domain)
 				if res.NeedsDNS {
-					// Claiming only records ownership on the server; nothing
-					// resolves until DNS points here, and no certificate can be
-					// issued either.
+					// A claim records ownership; nothing resolves, and no
+					// certificate can be issued, until DNS points here.
 					fmt.Printf("\nPoint %s at this server's address before it will resolve.\n", domain)
 				}
 				return nil
@@ -105,8 +104,8 @@ func newReleaseCmd(path *string) *cobra.Command {
 	}
 }
 
-// withSession brings up a short-lived control session and runs one request on
-// it. Registering no tunnels keeps this to the control stream alone.
+// withSession runs one request over a short-lived session. Registering no
+// tunnels keeps it to the control stream.
 func withSession(parent context.Context, path string, fn func(*agent.Agent) error) error {
 	cfg, err := load(path)
 	if err != nil {

@@ -30,10 +30,8 @@ func main() {
 	}
 }
 
-// hintDoubleDash softens the one breaking change in moving to cobra. Flags used
-// to parse with a single dash; pflag follows POSIX, where a single dash
-// introduces short flags only. A stale command line therefore fails with a
-// message about shorthand flags, which does not obviously mean "add a dash".
+// hintDoubleDash covers the one breaking change in moving to cobra: pflag wants
+// two dashes, and "unknown shorthand flag" does not say so.
 func hintDoubleDash(w io.Writer, args []string) {
 	for _, a := range args {
 		if len(a) > 2 && a[0] == '-' && a[1] != '-' {
@@ -43,9 +41,8 @@ func hintDoubleDash(w io.Writer, args []string) {
 	}
 }
 
-// serveOpts collects the server flags. Keeping them in one struct rather than a
-// pile of package-level pointers means the command can be built more than once,
-// which is what makes it testable.
+// serveOpts collects the server flags, so the command can be built more than
+// once rather than writing into package-level state.
 type serveOpts struct {
 	dbPath    string
 	control   string
@@ -75,12 +72,10 @@ func newRootCmd() *cobra.Command {
 		Long: "lcd is the server half of lc. It runs on a host with a public address,\n" +
 			"accepts sessions from agents behind NAT, and routes public traffic down them.",
 		Args: cobra.NoArgs,
-		// Errors are printed once, by main, with the binary's name in front.
-		SilenceErrors: true,
-		// Usage is worth printing when the command line itself is wrong, which
-		// cobra has already finished checking by the time this runs; a failure
-		// after it is a runtime one, and dumping the flag list at it only buries
-		// the message.
+		// main prints errors, prefixed with the binary name. Usage is worth
+		// printing for a bad command line but not for a runtime failure, and by
+		// PersistentPreRun cobra has finished parsing.
+		SilenceErrors:    true,
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) { cmd.Root().SilenceUsage = true },
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return serve(cmd.Context(), o)
@@ -241,7 +236,7 @@ func newLogger(debug bool) *slog.Logger {
 }
 
 // trimList drops blank entries, so --reserved-hosts="" and a trailing comma are
-// both harmless.
+// harmless.
 func trimList(in []string) []string {
 	var out []string
 	for _, p := range in {

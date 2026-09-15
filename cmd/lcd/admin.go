@@ -35,8 +35,6 @@ func newAdminCmd() *cobra.Command {
 	return cmd
 }
 
-// open is shared by every admin subcommand: they all want the same database and
-// all want it closed again.
 func open(dbPath string, fn func(*store.DB) error) error {
 	db, err := store.Open(dbPath)
 	if err != nil {
@@ -60,7 +58,6 @@ func newTokenCmd(dbPath *string) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// The secret is shown once: only its hash is stored.
 				fmt.Printf("token id: %d\nsecret:   %s\n\nThis secret is not recoverable; store it now.\n", tok.ID, secret)
 				return nil
 			})
