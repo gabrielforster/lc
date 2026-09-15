@@ -114,7 +114,7 @@ That means implementing encryption and session-server calls. **It is not
 implemented**, and it is the right fix if this is ever exposed to people you do
 not know.
 
-Until then, treat `-allow-custom-domains` and a public Minecraft port as a
+Until then, treat `--allow-custom-domains` and a public Minecraft port as a
 friends-and-family arrangement backed by a firewall rule, not as multi-tenant
 hosting.
 
@@ -132,8 +132,8 @@ costs no DNS work at all.
 ## Verifying a real server
 
 ```sh
-lcd -db lc.db -control :7000 -minecraft :25565 -public-host mc.example.com
-lc -config lc.json
+lcd --db lc.db --control :7000 --minecraft :25565 --public-host mc.example.com
+lc --config lc.json
 ```
 
 Join through the public hostname. In the server console, `/list` and the join

@@ -35,11 +35,11 @@ go build -o lcd ./cmd/lcd
 go build -o lc  ./cmd/lc
 
 # Mint a credential and grant it what it may claim.
-./lcd admin token -label laptop            # prints the secret once
-./lcd admin grant -token 1 -kind port_auto
-./lcd admin grant -token 1 -kind wildcard -value .mc.localhost
+./lcd admin token --label laptop            # prints the secret once
+./lcd admin grant --token 1 --kind port_auto
+./lcd admin grant --token 1 --kind wildcard --value .mc.localhost
 
-./lcd -control 127.0.0.1:7000 -http 127.0.0.1:8080 -minecraft 127.0.0.1:25565
+./lcd --control 127.0.0.1:7000 --http 127.0.0.1:8080 --minecraft 127.0.0.1:25565
 ```
 
 `lc.json` on the machine behind NAT:
@@ -57,9 +57,16 @@ go build -o lc  ./cmd/lc
 ```
 
 ```sh
-./lc -config lc.json
+./lc --config lc.json
 curl -H 'Host: web.mc.localhost' http://127.0.0.1:8080/
 ```
+
+Both binaries are cobra command trees — `lcd --help`, `lcd admin grant --help`,
+`lc domains --help` — and ship shell completion via `lcd completion zsh`.
+
+> [!IMPORTANT]
+> Flags take **two** dashes: `--control :7000`, not `-control :7000`. If you have
+> a script from before the cobra migration, that is the only change it needs.
 
 ## Documentation
 
@@ -68,7 +75,7 @@ curl -H 'Host: web.mc.localhost' http://127.0.0.1:8080/
 | [Deployment](docs/deployment.md) | VPS setup, systemd, firewall, with and without a domain |
 | [Architecture](docs/architecture.md) | How it works and why it is shaped this way |
 | [Control protocol](docs/protocol.md) | The agent/server wire protocol |
-| [Running lc](docs/operations.md) | Flags, config, grants, TLS, idle timeouts |
+| [Running lc](docs/operations.md) | The command line, flags, config, grants, TLS, idle timeouts |
 | [Minecraft](docs/minecraft.md) | Handshake routing, real player IPs, **and the `online-mode=false` warning** |
 
 > [!WARNING]
@@ -81,7 +88,7 @@ curl -H 'Host: web.mc.localhost' http://127.0.0.1:8080/
 
 ## State
 
-Server state lives in a SQLite file (`-db`, default `lc.db`): tokens, their
+Server state lives in a SQLite file (`--db`, default `lc.db`): tokens, their
 grants, claimed domains and port reservations. Token secrets are stored hashed
 and shown only once, at creation.
 
