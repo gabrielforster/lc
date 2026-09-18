@@ -39,6 +39,18 @@ Only open what you actually enable.
 | `25565` | `--minecraft` | Players | For Minecraft tunnels |
 | `20000-20100` | `--port-min` / `--port-max` | Everyone | For `tcp` tunnels |
 
+> [!IMPORTANT]
+> The flag and the firewall have to move together, and **`--http`, `--https` and `--minecraft`
+> are not on by default** — `--minecraft` and `--https` default to empty, meaning "disabled".
+> Either half alone fails silently rather than loudly:
+>
+> - flag without the firewall rule → `lcd` binds the port and the firewall drops every packet
+> - firewall rule without the flag → the port is open with nothing behind it
+>
+> Both present the same way: the agent connects, the tunnel registers, the startup log looks
+> healthy, and no user can reach it. The startup log names every listener it actually brought
+> up — check that list against what you opened.
+
 Narrow the control port to the agent's address if it is static. It is the only
 port where a leaked token is directly useful:
 
@@ -67,6 +79,23 @@ sudo useradd --system --home /var/lib/lc --create-home lc
 `CGO_ENABLED=0` is deliberate: the SQLite driver is pure Go, so the binary is
 static and can be built anywhere and copied to the VPS.
 
+**Building on the smallest tier does not work.** The table above says 512 MB is plenty to
+*run* `lcd`; the Go compiler needs several times that and will be OOM-killed. On a 512 MB
+box, cross-compile elsewhere and copy the binary in — set `GOARCH` to match the VPS, not
+your laptop:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o lcd ./cmd/lcd   # ARM VPS (Graviton, Ampere)
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o lcd ./cmd/lcd   # x86-64 VPS
+```
+
+> [!TIP]
+> `lc` and `lcd` differ by one letter, are built from one checkout, and belong on **different
+> machines with possibly different architectures**. Copying the wrong one gets you
+> `cannot execute binary file: Exec format error` on first run. Build to arch-tagged names
+> (`dist/lcd-arm64`, `dist/lc-amd64`) so `file dist/*` tells you which is which before you
+> `scp` it.
+
 Optionally install shell completion for the subcommands, flags and the `--tls`
 and `--kind` value sets:
 
@@ -83,7 +112,26 @@ sudo -u lc lcd admin token --db /var/lib/lc/lc.db --label home
 ```
 
 Then grant it what it may claim — see [Running lc](operations.md) for the grant
-kinds.
+kinds:
+
+```sh
+sudo -u lc lcd admin grant --db /var/lib/lc/lc.db --token 1 \
+  --kind wildcard --value .tunnel.example.com
+```
+
+> [!IMPORTANT]
+> `--db` is a **persistent flag on `lcd admin`**, inherited by `token`, `grant` and `list`
+> alike, and it defaults to `lc.db` in the *current directory*. Every admin command run
+> against a VPS install needs it. Omit it and the command looks for a database beside
+> wherever you happen to be standing — under `sudo -u lc` from another user's home that is
+> a path `lc` cannot even create, and it fails with:
+>
+> ```
+> lcd: unable to open database file (14)
+> ```
+>
+> The confusing case is mixing the two: mint a token *with* `--db` and grant *without* it,
+> and the token lands in the real database while the grant goes looking for a different one.
 
 ### systemd unit
 
@@ -151,6 +199,13 @@ tunnel.example.com.      IN A     203.0.113.5
 *.tunnel.example.com.    IN A     203.0.113.5
 ```
 
+> [!WARNING]
+> If your DNS provider offers a reverse proxy — Cloudflare's orange cloud is the common one —
+> these records must be **DNS-only**. Proxying breaks `lcd` three ways: the proxy answers the
+> ACME `http-01` challenge on port 80, so `autocert` never completes; viewers get the proxy's
+> certificate rather than yours; and an HTTP-layer proxy cannot carry the `tcp` port range or
+> the Minecraft listener at all, since neither is HTTP.
+
 Then run with the domain as `--public-host`. To let agents claim their own
 subdomains at runtime, add `--allow-custom-domains`, and reserve any name the
 server itself uses:
@@ -173,6 +228,28 @@ An `SRV` record lets players type a bare hostname with no port:
 ```
 _minecraft._tcp.mc.example.com.  IN SRV 0 5 25565 mc.example.com.
 ```
+
+You only need one if the listener is on a **non-default port**. `--minecraft :25565` is the
+port a client already assumes, so the tunnel hostname works bare without any `SRV`. The record
+earns its place when you want a name that is not the tunnel's own — players typing
+`mc.example.com` for a tunnel served at `survival.tunnel.example.com`.
+
+> [!IMPORTANT]
+> **The target is the load-bearing field.** A client that follows an `SRV` puts the record's
+> **target** into the handshake's server-address field — not the name the player typed — and
+> that field is the routing key. So the target must be a hostname a tunnel actually serves:
+>
+> ```
+> _minecraft._tcp.mc.example.com. IN SRV 0 5 25565 survival.tunnel.example.com.
+> ```
+>
+> Pointing the target at the server's own `--public-host` sends the routing key to a name in
+> `--reserved-hosts`, and the connection is refused.
+>
+> For the same reason, do **not** also publish an `A` record for the pretty name as a
+> fallback. A client that skips the `SRV` lookup would connect directly and present
+> `mc.example.com` as the routing key, which no tunnel serves — breaking exactly the case the
+> fallback was meant to cover. Keep one routing key in play.
 
 ### Verifying
 
@@ -263,10 +340,13 @@ The agent needs **no inbound ports and no public address** — that is the whole
 point. It only needs to reach the server's control port.
 
 ```sh
-CGO_ENABLED=0 go build -o lc ./cmd/lc
+CGO_ENABLED=0 go build -o lc ./cmd/lc          # add GOOS/GOARCH if building for another machine
 sudo install -m 0755 lc /usr/local/bin/lc
 sudo mkdir -p /etc/lc
 ```
+
+This is `lc`, the agent — **not** `lcd`, and built for *this* machine's architecture, which is
+usually not the VPS's. See the tip under [Installing the server](#installing-the-server).
 
 `/etc/lc/lc.json`:
 
@@ -383,8 +463,11 @@ There is no status endpoint yet
 | `conflict: host already served by a live tunnel` | Two tunnels claim one hostname. Another agent holds it, or you hit [#11](https://github.com/gabrielforster/lc/issues/11) with an `http` and a `minecraft` tunnel on the same name |
 | `unknown shorthand flag: 'c' in -control` | A command line from before the cobra migration. Flags take two dashes now: `--control`. The binary says so under the error |
 | `auth: unknown or disabled token` | Wrong secret, or the wrong `--db` file. The agent stops rather than retrying |
+| `lcd: unable to open database file (14)` | An `lcd admin` command without `--db`, so it looked for `lc.db` in the current directory. `--db` is persistent across the admin subcommands and is needed on every one |
+| `cannot execute binary file: Exec format error` | The wrong binary or the wrong architecture: `lcd` copied where `lc` belongs, or an `arm64` build on an `x86-64` machine. `file ./lc` names the architecture it was built for |
+| The client times out; the server log shows `tunnel open` | The listener is bound but the firewall or cloud security group drops inbound packets to it. The tunnel registering says nothing about whether anyone can reach the port |
 | `forbidden` on registration | No grant covers the hostname or port. Check `lcd admin list` |
 | `502` from an HTTP tunnel | No agent connected for that hostname, or the local service is down |
-| A Minecraft client cannot connect | The hostname it typed must match the tunnel's `host` exactly — that string is the routing key |
+| A Minecraft client cannot connect | The hostname it typed must match the tunnel's `host` exactly — that string is the routing key. If an `SRV` record is involved, the routing key is the record's **target**, not what the player typed |
 | Certificate errors with `autocert` | DNS must point at the server and port 80 must be reachable, before a certificate can be issued |
 | Everyone appears as `127.0.0.1` in Minecraft | The tunnel's `kind` is `tcp` rather than `minecraft`, so no handshake rewrite happens |

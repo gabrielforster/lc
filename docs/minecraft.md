@@ -126,6 +126,24 @@ An `SRV` record lets players type a bare hostname with no `:25565`:
 _minecraft._tcp.mc.example.com.  IN SRV 0 5 25565 mc.example.com.
 ```
 
+Only needed if the listener is on a non-default port — `:25565` is what a client assumes
+anyway, so the tunnel's own hostname already works bare. Its real use is giving a tunnel a
+name it does not otherwise serve.
+
+Which runs straight into the routing key described above. A client following an `SRV` puts the
+record's **target** in the handshake's server-address field, not the name the player typed, so
+the target is what gets matched against live tunnels:
+
+```
+_minecraft._tcp.mc.example.com. IN SRV 0 5 25565 survival.tunnel.example.com.
+                                                 ^ this is the routing key
+```
+
+Target a name no tunnel serves — the server's own `--public-host`, say, which is usually in
+`--reserved-hosts` — and the connection is refused even though DNS resolved perfectly. And do
+not publish an `A` record for the pretty name as a backstop: a client skipping the `SRV` lookup
+would then arrive with a routing key nothing serves.
+
 A wildcard `A` record (`*.mc.example.com`) means handing out a new subdomain
 costs no DNS work at all.
 
