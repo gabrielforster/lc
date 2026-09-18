@@ -101,6 +101,18 @@ lcd admin grant --token 1 --kind wildcard --value .mc.example.com
 lcd admin list                         # tokens with their grants, domains and ports
 ```
 
+These run against `./lc.db`, the default. `--db` is a **persistent flag on `lcd admin`** —
+accepted by every subcommand and needed by all of them once the database lives elsewhere,
+as it does on any real install:
+
+```sh
+lcd admin grant --db /var/lib/lc/lc.db --token 1 --kind wildcard --value .mc.example.com
+```
+
+Passing it to some subcommands and not others is the trap: the token is minted in one
+database and the grant is written to another, or fails outright with
+`unable to open database file (14)` if the working directory is not writable.
+
 Token secrets are stored **hashed** and shown only at creation — a listing
 cannot leak a working credential, which matters once a UI can display them.
 
